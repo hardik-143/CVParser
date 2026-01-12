@@ -171,7 +171,7 @@
     setStatus("Analyzing extracted text…", "info");
 
     try {
-      const resp = await fetch("http://127.0.0.1:8000/parse-extracted-cv", {
+      const resp = await fetch("https://cvparser-production-8cf1.up.railway.app/parse-extracted-cv", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
