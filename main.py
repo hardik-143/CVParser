@@ -988,9 +988,9 @@ async def parse_extracted_cv(request: ExtractedTextRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 # render html file from /templates
-@app.get("/")
-async def read_root():
-    return FileResponse("index.html")
+# @app.get("/")
+# async def read_root():
+#     return FileResponse("index.html")
 
 @app.get("/health")
 async def health_check():
