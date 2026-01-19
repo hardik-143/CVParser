@@ -33,6 +33,12 @@ class BasicInfo(BaseModel):
     phone: Optional[str]
     linkedin: Optional[str]
     github: Optional[str]
+    postcode: Optional[str]
+    dob: Optional[str]
+    address: Optional[str]
+    county: Optional[str]
+    region: Optional[str]
+    gmc_number: Optional[str]
 
 class Entities(BaseModel):
     people: List[str] = []
@@ -70,6 +76,11 @@ class ParsedCV(BaseModel):
     email: Optional[str]
     phone: Optional[str]
     address: Optional[str]
+    postcode: Optional[str]
+    dob: Optional[str]
+    county: Optional[str]
+    region: Optional[str]
+    gmc_number: Optional[str]
     skills: List[str]
     education: List[Education]
     experience: List[Experience]
@@ -617,6 +628,54 @@ class IntelligentCVParser:
                 "confidence": parsed_cv.confidence_scores.get('github', 0.0)
             })
         
+        if parsed_cv.postcode:
+            data_array.append({
+                "type": "contact_info",
+                "field": "postcode",
+                "value": parsed_cv.postcode,
+                "confidence": parsed_cv.confidence_scores.get('postcode', 0.0)
+            })
+        
+        if parsed_cv.dob:
+            data_array.append({
+                "type": "personal_info",
+                "field": "dob",
+                "value": parsed_cv.dob,
+                "confidence": parsed_cv.confidence_scores.get('dob', 0.0)
+            })
+        
+        if parsed_cv.address:
+            data_array.append({
+                "type": "contact_info",
+                "field": "address",
+                "value": parsed_cv.address,
+                "confidence": parsed_cv.confidence_scores.get('address', 0.0)
+            })
+        
+        if parsed_cv.county:
+            data_array.append({
+                "type": "contact_info",
+                "field": "county",
+                "value": parsed_cv.county,
+                "confidence": parsed_cv.confidence_scores.get('county', 0.0)
+            })
+        
+        if parsed_cv.region:
+            data_array.append({
+                "type": "contact_info",
+                "field": "region",
+                "value": parsed_cv.region,
+                "confidence": parsed_cv.confidence_scores.get('region', 0.0)
+            })
+        
+        if parsed_cv.gmc_number:
+            data_array.append({
+                "type": "personal_info",
+                "field": "gmc_number",
+                "value": parsed_cv.gmc_number,
+                "confidence": parsed_cv.confidence_scores.get('gmc_number', 0.0)
+            })
+        
         # Skills
         for skill in parsed_cv.skills:
             data_array.append({
@@ -889,6 +948,220 @@ class IntelligentCVParser:
         
         return (None, 0.0)
     
+    def extract_postcode(self, text: str, provided_postcode: Optional[str]) -> tuple[Optional[str], float]:
+        """Extract postcode (UK format supported)"""
+        if provided_postcode:
+            postcode = provided_postcode.strip().upper()
+            # Basic UK postcode validation
+            if len(postcode) >= 4 and len(postcode) <= 8:
+                return (postcode, 0.95)
+        
+        # Search for UK postcode pattern in text
+        # UK postcode format: SW1A 1AA, M1 1AE, B33 8TH, etc.
+        uk_postcode_pattern = r'\b[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2}\b'
+        matches = re.finditer(uk_postcode_pattern, text, re.IGNORECASE)
+        
+        for match in matches:
+            postcode = match.group(0).strip().upper()
+            return (postcode, 0.85)
+        
+        return (None, 0.0)
+    
+    def extract_date_of_birth(self, text: str, provided_dob: Optional[str]) -> tuple[Optional[str], float]:
+        """Extract date of birth in DD-MM-YYYY format (e.g., 19-05-2002)"""
+        # Month name to number mapping
+        month_map = {
+            'jan': '01', 'january': '01',
+            'feb': '02', 'february': '02',
+            'mar': '03', 'march': '03',
+            'apr': '04', 'april': '04',
+            'may': '05',
+            'jun': '06', 'june': '06',
+            'jul': '07', 'july': '07',
+            'aug': '08', 'august': '08',
+            'sep': '09', 'september': '09',
+            'oct': '10', 'october': '10',
+            'nov': '11', 'november': '11',
+            'dec': '12', 'december': '12'
+        }
+        
+        if provided_dob:
+            # Normalize provided date to DD-MM-YYYY format
+            dob = provided_dob.strip()
+            # Try to parse various formats and convert to DD-MM-YYYY
+            date_patterns = [
+                (r'(\d{2})[-/](\d{2})[-/](\d{4})', lambda m: f"{m.group(1)}-{m.group(2)}-{m.group(3)}"),  # DD-MM-YYYY or DD/MM/YYYY
+                (r'(\d{4})[-/](\d{2})[-/](\d{2})', lambda m: f"{m.group(3)}-{m.group(2)}-{m.group(1)}"),  # YYYY-MM-DD or YYYY/MM/DD
+            ]
+            
+            for pattern, formatter in date_patterns:
+                match = re.search(pattern, dob)
+                if match:
+                    return (formatter(match), 0.95)
+            
+            # If provided but doesn't match patterns, still return it
+            if len(dob) > 0:
+                return (dob, 0.7)
+        
+        # Search for date of birth pattern in text
+        # Pattern 1: Numeric format like "DOB: 19-05-2002" or "Date of Birth: 19-05-2002"
+        dob_patterns = [
+            r'(?:DOB|Date of Birth|Born)\s*[:\s-]*\s*(\d{2})[-/](\d{2})[-/](\d{4})',
+        ]
+        
+        for pattern in dob_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                if len(match.groups()) == 3:
+                    # DD-MM-YYYY format
+                    return (f"{match.group(1)}-{match.group(2)}-{match.group(3)}", 0.85)
+        
+        # Pattern 2: Month name format like "Date of Birth: 14 March 1989" or "Born: 14 March 1989"
+        month_pattern = r'(?:Date of Birth|DOB|Born|Birthday)\s*[:\s-]*\s*(\d{1,2})\s+(' + '|'.join(month_map.keys()) + r')\.?\s+(\d{4})'
+        match = re.search(month_pattern, text, re.IGNORECASE)
+        if match:
+            day = match.group(1).zfill(2)  # Pad day to 2 digits
+            month_name = match.group(2).lower()
+            year = match.group(3)
+            month = month_map.get(month_name, None)
+            if month:
+                return (f"{day}-{month}-{year}", 0.85)
+        
+        # Pattern 3: Standalone date patterns that might be DOB
+        date_pattern = r'\b(0[1-9]|[12]\d|3[01])[-/](0[1-9]|1[0-2])[-/](19|20)(\d{2})\b'
+        matches = re.finditer(date_pattern, text)
+        
+        for match in matches:
+            # Filter likely DOB (not too recent, not too old)
+            day = match.group(1)
+            month = match.group(2)
+            year_prefix = match.group(3)
+            year_suffix = match.group(4)
+            year = year_prefix + year_suffix
+            year_int = int(year)
+            current_year = 2026
+            age = current_year - year_int
+            
+            # Reasonable age range: 16-80 years old
+            if 16 <= age <= 80:
+                return (f"{day}-{month}-{year}", 0.75)
+        
+        return (None, 0.0)
+    
+    def extract_address(self, text: str, provided_address: Optional[str]) -> tuple[Optional[str], float]:
+        """Extract address from CV text"""
+        if provided_address:
+            address = provided_address.strip()
+            if len(address) > 5:
+                return (address, 0.95)
+        
+        # Look for address patterns in the first section of text
+        lines = text.split('\n')[:20]  # Check first 20 lines
+        
+        # Common address indicators
+        address_keywords = ['flat', 'apartment', 'street', 'road', 'avenue', 'lane', 'drive', 'close', 'court', 'building', 'house', 'block', 'unit']
+        
+        for i, line in enumerate(lines):
+            line_lower = line.lower().strip()
+            
+            # Skip common non-address lines
+            if any(skip in line_lower for skip in ['email', 'phone', 'mobile', 'linkedin', 'github', 'date of birth', 'dob']):
+                continue
+            
+            # Check if line contains address keywords
+            if any(kw in line_lower for kw in address_keywords):
+                # Collect this line and potentially the next line
+                address_parts = [line.strip()]
+                if i + 1 < len(lines):
+                    next_line = lines[i + 1].strip()
+                    # Add next line if it looks like address continuation (city/region/postcode)
+                    if len(next_line) < 100 and next_line and not any(skip in next_line.lower() for skip in ['email', 'phone', 'date']):
+                        address_parts.append(next_line)
+                
+                address = ', '.join(address_parts)
+                if len(address) > 5:
+                    return (address, 0.80)
+        
+        return (None, 0.0)
+    
+    def extract_county(self, text: str, provided_county: Optional[str]) -> tuple[Optional[str], float]:
+        """Extract county from address or text"""
+        if provided_county:
+            county = provided_county.strip()
+            if len(county) > 2:
+                return (county, 0.95)
+        
+        # UK counties
+        uk_counties = [
+            'berkshire', 'bristol', 'buckinghamshire', 'cambridgeshire', 'cheshire', 'cornwall',
+            'county durham', 'cumbria', 'derbyshire', 'devon', 'dorset', 'essex', 'gloucestershire',
+            'greater london', 'greater manchester', 'hampshire', 'herefordshire', 'hertfordshire',
+            'isle of wight', 'kent', 'lancashire', 'leicestershire', 'lincolnshire', 'london',
+            'manchester', 'merseyside', 'middlesex', 'milton keynes', 'norfolk', 'northamptonshire',
+            'northumberland', 'nottinghamshire', 'oxfordshire', 'peterborough', 'shropshire',
+            'somerset', 'south yorkshire', 'southend-on-sea', 'staffordshire', 'stoke-on-trent',
+            'suffolk', 'surrey', 'sussex', 'tyne and wear', 'warrington', 'warwickshire', 'west midlands',
+            'west sussex', 'west yorkshire', 'wiltshire', 'worcestershire', 'yorkshire'
+        ]
+        
+        text_lower = text.lower()
+        for county in uk_counties:
+            if county in text_lower:
+                return (county.title(), 0.85)
+        
+        return (None, 0.0)
+    
+    def extract_region(self, text: str, provided_region: Optional[str]) -> tuple[Optional[str], float]:
+        """Extract region (city/area) from address or text"""
+        if provided_region:
+            region = provided_region.strip()
+            if len(region) > 2:
+                return (region, 0.95)
+        
+        # UK major cities and regions
+        uk_regions = [
+            'london', 'manchester', 'birmingham', 'leeds', 'glasgow', 'sheffield', 'bristol',
+            'edinburgh', 'liverpool', 'hull', 'newcastle', 'nottingham', 'coventry', 'leicester',
+            'cardiff', 'belfast', 'durham', 'brighton', 'dover', 'oxford', 'cambridge', 'york',
+            'bath', 'exeter', 'plymouth', 'leicester', 'wolverhampton', 'slough', 'reading',
+            'southampton', 'portsmouth', 'northampton', 'cambridge', 'norwich', 'peterborough',
+            'derby', 'stoke', 'sunderland', 'walsall', 'telford', 'chesterfield', 'wakefield',
+            'bradford', 'kingston', 'croydon', 'merseyside', 'tyne'
+        ]
+        
+        lines = text.split('\n')[:25]
+        text_lower = text.lower()
+        
+        for region in uk_regions:
+            if region in text_lower:
+                return (region.title(), 0.85)
+        
+        return (None, 0.0)
+    
+    def extract_gmc_number(self, text: str, provided_gmc: Optional[str]) -> tuple[Optional[str], float]:
+        """Extract GMC number (General Medical Council - UK medical professional registration)"""
+        if provided_gmc:
+            gmc = provided_gmc.strip()
+            # GMC numbers are typically 7 digits
+            if re.match(r'^\d{7,8}$', gmc):
+                return (gmc, 0.95)
+        
+        # Search for GMC number patterns
+        # GMC numbers: 7 or 8 digit numbers, often preceded by "GMC:", "GMC Number:", "GMC No:", "Registration Number:"
+        patterns = [
+            r'(?:GMC|General Medical Council)[\s:]*#?(\d{7,8})',
+            r'(?:GMC|Medical Council|Registration)\s+(?:No\.?|Number|#)[\s:]*(\d{7,8})',
+            r'(?:GMC)[\s]*(\d{7,8})',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                gmc_number = match.group(1)
+                return (gmc_number, 0.90)
+        
+        return (None, 0.0)
+    
     def parse_cv(self, request: ExtractedTextRequest) -> ParsedCV:
         """Main parsing function with intelligent section detection"""
         text = request.raw_text
@@ -946,6 +1219,30 @@ class IntelligentCVParser:
         summary, summary_conf = self.extract_summary(sections)
         confidence_scores['summary'] = summary_conf
         
+        # Postcode
+        postcode, postcode_conf = self.extract_postcode(text, basic_info.postcode if basic_info else None)
+        confidence_scores['postcode'] = postcode_conf
+        
+        # Date of Birth
+        dob, dob_conf = self.extract_date_of_birth(text, basic_info.dob if basic_info else None)
+        confidence_scores['dob'] = dob_conf
+        
+        # Address
+        address, address_conf = self.extract_address(text, basic_info.address if basic_info else None)
+        confidence_scores['address'] = address_conf
+        
+        # County
+        county, county_conf = self.extract_county(text, basic_info.county if basic_info else None)
+        confidence_scores['county'] = county_conf
+        
+        # Region
+        region, region_conf = self.extract_region(text, basic_info.region if basic_info else None)
+        confidence_scores['region'] = region_conf
+        
+        # GMC Number
+        gmc_number, gmc_conf = self.extract_gmc_number(text, basic_info.gmc_number if basic_info else None)
+        confidence_scores['gmc_number'] = gmc_conf
+        
         logger.info(f"Parsing complete. Name: {name}, Education: {len(education)}, Experience: {len(experience)}, Skills: {len(skills)}")
         
         return ParsedCV(
@@ -955,7 +1252,12 @@ class IntelligentCVParser:
             candidate_surname=candidate_surname,
             email=email,
             phone=phone,
-            address=None,
+            address=address,
+            postcode=postcode,
+            dob=dob,
+            county=county,
+            region=region,
+            gmc_number=gmc_number,
             skills=skills,
             education=education,
             experience=experience,
