@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -6,6 +6,10 @@ from typing import List, Optional, Dict, Any, Union
 import spacy
 import re
 import logging
+from pdf2image import convert_from_bytes
+from PIL import Image
+import pytesseract
+import io
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1271,6 +1275,75 @@ class IntelligentCVParser:
 
 parser = IntelligentCVParser()
 
+class IntelligentDocumentExtractor:
+    """Generic OCR-based document extractor"""
+
+    def extract_text(self, file: UploadFile) -> str:
+        content = file.file.read()
+        file.file.seek(0)
+        if file.filename.lower().endswith(".pdf"):
+            images = convert_from_bytes(content, dpi=300)
+            text = ""
+            for img in images:
+                text += pytesseract.image_to_string(img)
+            return text
+
+        image = Image.open(io.BytesIO(content))
+        return pytesseract.image_to_string(image)
+
+    def detect_document_type(self, text: str) -> str:
+        keywords = {
+            "passport": ["passport"],
+            "driving_licence": ["driving licence", "driving license"],
+            "brp": ["biometric residence permit", "brp"],
+            "dbs": ["dbs certificate"],
+            "invoice": ["invoice", "bill"],
+            "bank_statement": ["statement", "account number"],
+        }
+
+        t = text.lower()
+        for dtype, kws in keywords.items():
+            if any(kw in t for kw in kws):
+                return dtype.replace("_", " ").title()
+
+        return "Unknown"
+
+    def extract_generic_fields(self, text: str) -> dict:
+        patterns = {
+            "dates": r"\b\d{2}[/-]\d{2}[/-]\d{4}\b",
+            "document_number": r"\b[A-Z0-9]{5,20}\b",
+            "registration_number": r"(Reg(istration)? No|Reg No)[: ]*([A-Z0-9\-]+)",
+            "id_number": r"(ID|Identity)[: ]*([A-Z0-9]+)",
+        }
+
+        extracted = {}
+        for key, pattern in patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            extracted[key] = (
+                match.group(match.lastindex)
+                if match and match.lastindex
+                else match.group(0) if match else None
+            )
+
+        return extracted
+
+    def parse_document(self, file: UploadFile) -> dict:
+        raw_text = self.extract_text(file)
+        doc_type = self.detect_document_type(raw_text)
+        fields = self.extract_generic_fields(raw_text)
+
+        return {
+            "file_name": file.filename,
+            "document_type": doc_type,
+            "document_number": fields.get("document_number"),
+            "registration_number": fields.get("registration_number"),
+            "id_number": fields.get("id_number"),
+            "dates": fields.get("dates"),
+            "raw_text": raw_text[:3000],
+        }
+
+document_extractor = IntelligentDocumentExtractor()
+
 @app.post("/parse-extracted-cv")
 async def parse_extracted_cv(request: ExtractedTextRequest):
     """Parse pre-extracted CV text and return data in array format"""
@@ -1309,6 +1382,14 @@ async def health_check():
         "service": "Intelligent CV Text Parser",
         "version": "2.0"
     }
+
+@app.post("/extract-document")
+async def extract_document(file: UploadFile = File(...)):
+    if not file.filename.lower().endswith((".png", ".jpg", ".jpeg", ".pdf")):
+        raise HTTPException(status_code=400, detail="Unsupported file format")
+
+    return document_extractor.parse_document(file)
+
 
 if __name__ == "__main__":
     import uvicorn
